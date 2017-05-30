@@ -45,8 +45,14 @@ int solvetri(VectorXd*, VectorXd*);
 
 int polynomialNeumann(VectorXd*);
 
+int polynomialHorner(VectorXd*);
+
 int main(int argc, char *argv[])
 {
+	//Defining variables to keep track of times
+	clock_t time_init, time_end;
+	double time_neumann=0.0, time_horner=0.0;
+
 	//Defining the number of threads
 	//omp_set_num_threads(5);
 	//setNbThreads(5);
@@ -54,9 +60,9 @@ int main(int argc, char *argv[])
 	cout << "The number of threads is " << nthreads << "." << endl;
 
 	//Initiallizing the input and output matrices
-	unsigned int msize = 5;
+	unsigned int msize = 100;
 	inputmatrix = new MatrixXd(msize, msize);
-	*inputmatrix = MatrixXd::Random(msize, msize);
+	*inputmatrix = MatrixXd::Random(msize, msize);//MatrixXd::Random(msize, msize);
 	//Setting up output matrix to store the final result
 	outputmatrix = new MatrixXd(msize, msize);
 	*outputmatrix = MatrixXd::Zero(msize, msize);
@@ -64,16 +70,37 @@ int main(int argc, char *argv[])
 	//Calling the matrix polynomial evaluation function
 	VectorXd coeffs(9);
 	for(unsigned int i = 0; i < 9; i++) coeffs(i) = 2*i+1;
+	time_init = clock();
 	int presult = polynomialNeumann(&coeffs);
+	time_end = clock();
+	time_neumann = 1000*(time_end-time_init)/(double)CLOCKS_PER_SEC;
 	if(presult) {
 		cout << "The function plynomialNeumann return with code " << presult << "." << endl;
 		exit(FAIL);
 	}
 
-	cout << "Input and output matrices are:" << endl;
+	cout << "The function polynomialNeumann(...) had been completed." << endl;
+	//Saving the polynomialNeumann matrix result
+	MatrixXd neumannOutput = *outputmatrix;
+
+	//Executing the polynomialHorner(...) function
+	time_init = clock();
+	presult = polynomialHorner(&coeffs);
+	time_end = clock();
+	time_horner = 1000*(time_end-time_init)/(double)CLOCKS_PER_SEC;
+	//Saving the polynomialHorner matrix result
+	MatrixXd hornerOutput = *outputmatrix;
+
+
+
+	/*cout << "Input :" << endl;
 	cout << *inputmatrix << endl;
-	cout << " and " << endl;
-	cout << *outputmatrix << endl;
+	cout << "Horner:" << endl;
+	cout << hornerOutput << endl;
+	cout << "Neumann:" << endl;
+	cout << neumannOutput << endl;*/
+	cout << "The norm of the difference is:" << (hornerOutput-neumannOutput).norm() << "." << endl;
+	cout << "Neumann time = " << time_neumann << " Horner time = " << time_horner << endl;
 
    /* Last thing that main() should do */
    pthread_exit(NULL);
@@ -139,6 +166,7 @@ void *neumann(void* data){
 		break;
 	case (3):
 		tempm = identity+(*inputmatrix)+(*inputmatrix)*(*inputmatrix);
+		break;
 	case (4):
 		squared = (*inputmatrix)*(*inputmatrix);
 		tempm = (identity+(*inputmatrix))*(identity+squared);
@@ -174,6 +202,7 @@ void *neumann(void* data){
 		pthread_exit((void*) status);
 	}
 
+	//Scaling the tempm matrix before updating the outputmatrix
 	tempm = alpha*tempm;
 
 	//Synchronizing to update the matrix
@@ -261,6 +290,9 @@ int polynomialNeumann(VectorXd* coeffs){
 	//Initiatling the mutex
 	pthread_mutex_init(&mutex, NULL);
 
+	//Before the computation starts, the outputmatrx must be cleared
+	*outputmatrix = MatrixXd::Zero(inputmatrix->rows(), inputmatrix->cols());
+
 	for(unsigned int i = 0; i < coeffs->rows(); i++){
 		//Building the data structure to be sent to the thread i
 		Stt* data = &datarray[i];
@@ -276,7 +308,7 @@ int polynomialNeumann(VectorXd* coeffs){
 
 	cout << "All the threads are created" << endl;
 
-	for(unsigned int i = 0; i < NUM_THREADS; i++){
+	for(unsigned int i = 0; i < coeffs->rows(); i++){
 		rcreate = pthread_join(threads[i], &thread_status);
 		if(rcreate){
 			cout << "Error: unsuccessful exectution of thread " << i << endl;
@@ -291,6 +323,37 @@ int polynomialNeumann(VectorXd* coeffs){
 	//Deleting the created arrays
 	delete [] threads;
 	delete [] datarray;
+
+	return SUCCESS;
+}
+
+int polynomialHorner(VectorXd* coeffs){
+	/*
+	 * Input:
+	 * coeffs is a pointer for the vector representing the coefficients of the matrix polynomial.
+	 * Its size is the polynomial size.
+	 * Output:
+	 * Description:
+	 * this fucntion computes the matrix polynomial whose coefficients are given by the vector pointed by coeffs using Horner rule.
+	 * The input matrix is the one pointed by the global variable inputmatrix and the output occurs in the one pointed
+	 * by outputmatrix. Different from the other polynomialNeumann(...) function, this method can compute matrix polynomials of arbitrary size.
+	 */
+
+	//Defining temporary matrix
+	MatrixXd tempm = MatrixXd(inputmatrix->rows(), inputmatrix->cols());
+	tempm = MatrixXd::Zero(inputmatrix->rows(), inputmatrix->cols());
+
+	unsigned int poln = coeffs->rows();
+
+	//First Horner rule iteration
+	tempm = (*coeffs)(poln-1)*(MatrixXd::Identity(inputmatrix->rows(), inputmatrix->cols()));
+	//Remaining iterations
+	for(int i = poln-2; i >= 0; i--){
+		tempm = (*coeffs)(i)*(MatrixXd::Identity(inputmatrix->rows(), inputmatrix->cols()))+tempm*(*inputmatrix);
+	}
+
+	//Updating the outputmatrix
+	*outputmatrix = tempm;
 
 	return SUCCESS;
 }

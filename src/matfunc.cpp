@@ -41,65 +41,34 @@ typedef struct {
 
 void *neumann(void* datatoprocess);
 
+int solvetri(VectorXd*, VectorXd*);
+
+int polynomialNeumann(VectorXd*);
+
 int main(int argc, char *argv[])
 {
-	//Defining the vector of thread handles
-	pthread_t threads[NUM_THREADS];
-	//Defining the threads attributes
-	pthread_attr_t pattr;
+	//Defining the number of threads
+	//omp_set_num_threads(5);
+	//setNbThreads(5);
+	int nthreads = nbThreads();
+	cout << "The number of threads is " << nthreads << "." << endl;
 
-	//Array of structures to be sent to the functio neumann(...)
-	Stt datarray[NUM_THREADS];
-
-	//Auxiliary variable storing the pthread_create return
-	int rcreate;
-	//Auxiliary variable storing thread status after execution
-	void *thread_status = NULL;
-
-	//Matrix size to be simulated
-	unsigned int msize = 3;
-
-	//Initializing thread attribute and setting it to be joinable
-	pthread_attr_init(&pattr);
-	pthread_attr_setdetachstate(&pattr, PTHREAD_CREATE_JOINABLE);
-	//Initiatling the mutex
-	pthread_mutex_init(&mutex, NULL);
-
-	//Setting up the input matrix to be submitted to the Neumann series computation
+	//Initiallizing the input and output matrices
+	unsigned int msize = 5;
 	inputmatrix = new MatrixXd(msize, msize);
 	*inputmatrix = MatrixXd::Random(msize, msize);
 	//Setting up output matrix to store the final result
 	outputmatrix = new MatrixXd(msize, msize);
 	*outputmatrix = MatrixXd::Zero(msize, msize);
 
-	for(unsigned int i = 0; i < NUM_THREADS; i++){
-		//Building the data structure to be sent to the thread i
-		Stt* data = &datarray[i];
-		data->N = i+1;
-		data->alpha = 1.0;
-		cout << "In main: creating thread " << i << endl;
-		rcreate = pthread_create(&threads[i], &pattr, neumann, (void *)data);
-		if (rcreate){
-			cout << "ERROR; return code from pthread_create() is " << rcreate << endl;
-			exit(-1);
-		}
+	//Calling the matrix polynomial evaluation function
+	VectorXd coeffs(9);
+	for(unsigned int i = 0; i < 9; i++) coeffs(i) = 2*i+1;
+	int presult = polynomialNeumann(&coeffs);
+	if(presult) {
+		cout << "The function plynomialNeumann return with code " << presult << "." << endl;
+		exit(FAIL);
 	}
-
-	cout << "All the threads are created" << endl;
-
-	for(unsigned int i = 0; i < NUM_THREADS; i++){
-		cout << "Checking the thread " << i << "." << endl;
-		rcreate = pthread_join(threads[i], &thread_status);
-		if(rcreate){
-			cout << "Error: unsuccessful exectution of thread " << i << endl;
-			exit(-1);
-		}
-		cout << "Thread " << i << " finished with status " << *((int*) thread_status) << endl;
-	}
-
-	//Freeing the thread attribute and mutex
-	pthread_attr_destroy(&pattr);
-	pthread_mutex_destroy(&mutex);
 
 	cout << "Input and output matrices are:" << endl;
 	cout << *inputmatrix << endl;
@@ -110,19 +79,18 @@ int main(int argc, char *argv[])
    pthread_exit(NULL);
 }
 
-
-
 void *neumann(void* data){
-	/*TOUPDATE
+	/*
 	 * Input:
-	 * inputmatrix is a pointer for a real square matrix of arbitrary size
-	 * N is a unsigned int representing the series size
+	 * although we represent is as a void pointer, the inpurt argument is a pointer for a struct of type Stt.
+	 * The element N represents the series size and the element alpha represents the constant to be mutiplied by the
+	 * resulting Neumann series.
 	 * Output:
-	 * outputmatrix is a pointer for a real square matrix of arbitrary size
+	 * no output, but it modifies the matrix pointed by the global variable outputmatrix. The access synchronization is
+	 * accomplished by means of mutual exclusion (mutex) variable.
 	 * Description:
 	 * This function computes the Neumann series of the input matrix efficiently
-	 * up to size 9. The memmory for the output matrix is
-	 * allocated by the function and must be deallocated by the caling function.
+	 * up to size 9.
 	 */
 
 	//Converting the input structure to NeumannData type
@@ -213,8 +181,116 @@ void *neumann(void* data){
 	*outputmatrix += tempm;
 	pthread_mutex_unlock(&mutex);
 
-	cout << "inside size " << N << endl;
 	//The last thing that the thread executes
 	*status = SUCCESS;
 	pthread_exit((void*) status);
+}
+
+int solvetri(VectorXd* a, VectorXd* sol){
+	/*
+	 * Input:
+	 * the vector pointed by a represents the right-hand-side of the linear system associated with the matrix function
+	 * computation through several Neumann series.
+	 * Output:
+	 * the vector pointed by sol is the solution of the linear system associated with the matrix function
+	 * computation through several Neumann series.
+	 * Description:
+	 * this function solves the linear system associated with the matrix function computation through several Neumann series.
+	 * The memmory for the solution vector is allocated by the calling function and must be deallocated by it too.
+	 * The system is assumed to have a upper triangular matrix.
+	 */
+
+	if(sol->rows() != a->rows()) {
+		cout << "Error: input vectors with different sizes" << endl;
+		return FAIL;
+	}
+
+	//Using the analytical solution as described in the paper, we simply have
+	for(unsigned int i = 0; i < a->rows()-1; i++){
+		(*sol)(i) = (*a)(i)-(*a)(i+1);
+	}
+	(*sol)(a->rows()-1) = (*a)(a->rows()-1);
+
+	return SUCCESS;
+}
+
+int polynomialNeumann(VectorXd* coeffs){
+	/*
+	 * Input:
+	 * coeffs is a pointer for the vector representing the coefficients of the matrix polynomial.
+	 * Its size is the polynomial size.
+	 * Output:
+	 * Description:
+	 * this fucntion computes the matrix polynomial whose coefficients are given by the vector pointed by coeffs.
+	 * The input matrix is the one pointed by the global variable inputmatrix and the output occurs in the one pointed
+	 * by outputmatrix. All the computation is done using parallel computation which is accomplished through the implementation
+	 * of the function neumann(...).
+	 */
+
+	//Sanity Check
+	if(coeffs->rows() > 9) {
+		cout << "Error: the matrix polynomial must have size no greater than 9." << endl;
+		return FAIL;
+	}
+
+	//Defining the vector of thread handles
+	pthread_t* threads = new pthread_t[coeffs->rows()];
+	//Defining the threads attributes
+	pthread_attr_t pattr;
+
+	//Array of structures to be sent to the function neumann(...)
+	Stt* datarray = new Stt[coeffs->rows()];
+
+	//Solving he associated linear system
+	VectorXd sol = VectorXd(coeffs->rows());
+	int rsolve = solvetri(coeffs, &sol);
+
+	if(rsolve == FAIL){
+		cout << "Error: error during the solution of the linear system." << endl;
+		exit(FAIL);
+	}
+
+	//Auxiliary variable storing the pthread_create return
+	int rcreate;
+	//Auxiliary variable storing thread status after execution
+	void *thread_status = NULL;
+
+	//Initializing thread attribute and setting it to be joinable
+	pthread_attr_init(&pattr);
+	pthread_attr_setdetachstate(&pattr, PTHREAD_CREATE_JOINABLE);
+	//Initiatling the mutex
+	pthread_mutex_init(&mutex, NULL);
+
+	for(unsigned int i = 0; i < coeffs->rows(); i++){
+		//Building the data structure to be sent to the thread i
+		Stt* data = &datarray[i];
+		data->N = i+1;
+		data->alpha = sol(i);
+		cout << "In main: creating thread " << i << endl;
+		rcreate = pthread_create(&threads[i], &pattr, neumann, (void *)data);
+		if (rcreate){
+			cout << "ERROR; return code from pthread_create() is " << rcreate << endl;
+			exit(FAIL);
+		}
+	}
+
+	cout << "All the threads are created" << endl;
+
+	for(unsigned int i = 0; i < NUM_THREADS; i++){
+		rcreate = pthread_join(threads[i], &thread_status);
+		if(rcreate){
+			cout << "Error: unsuccessful exectution of thread " << i << endl;
+			exit(FAIL);
+		}
+		cout << "Thread " << i << " finished with status " << *((int*) thread_status) << endl;
+	}
+
+	//Freeing the thread attribute and mutex
+	pthread_attr_destroy(&pattr);
+	pthread_mutex_destroy(&mutex);
+	//Deleting the created arrays
+	delete [] threads;
+	delete [] datarray;
+
+	return SUCCESS;
 }

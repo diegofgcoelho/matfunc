@@ -49,6 +49,9 @@ int polynomialHorner(VectorXd*);
 
 int main(int argc, char *argv[])
 {
+	//Calling Eigen to be prepared to multithreading
+	initParallel();
+
 	//Defining variables to keep track of times
 	clock_t time_init, time_end;
 	double time_neumann=0.0, time_horner=0.0;
@@ -60,7 +63,7 @@ int main(int argc, char *argv[])
 	cout << "The number of threads is " << nthreads << "." << endl;
 
 	//Initiallizing the input and output matrices
-	unsigned int msize = 100;
+	unsigned int msize = 1000;
 	inputmatrix = new MatrixXd(msize, msize);
 	*inputmatrix = MatrixXd::Random(msize, msize);//MatrixXd::Random(msize, msize);
 	//Setting up output matrix to store the final result
@@ -99,7 +102,8 @@ int main(int argc, char *argv[])
 	cout << hornerOutput << endl;
 	cout << "Neumann:" << endl;
 	cout << neumannOutput << endl;*/
-	cout << "The norm of the difference is:" << (hornerOutput-neumannOutput).norm() << "." << endl;
+	double dnorm = (hornerOutput-neumannOutput).norm();
+	cout << "The norm of the difference is:" << dnorm << "." << endl;
 	cout << "Neumann time = " << time_neumann << " Horner time = " << time_horner << endl;
 
    /* Last thing that main() should do */
@@ -120,6 +124,10 @@ void *neumann(void* data){
 	 * up to size 9.
 	 */
 
+	clock_t time_ini, time_end;
+	double time_overhead=0.0, time_comp=0.0, time_total=0.0, time_tcomp=0.0;
+
+	time_ini = clock();
 	//Converting the input structure to NeumannData type
 	Stt* mydata = (Stt*) data;
 	//Passing the series size
@@ -156,45 +164,66 @@ void *neumann(void* data){
 	//Defining the temporary matrix that will be added to the global outputmatrix
 	MatrixXd tempm = MatrixXd(inputmatrix->rows(), inputmatrix->cols());
 
+	time_end = clock();
+	time_overhead = 1000*(time_end-time_ini)/(double)CLOCKS_PER_SEC;
+
 	//Switch case for each differen series size
 	switch(N){
 	case (1):
+		time_end = clock();
 		tempm = identity;
+		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (2):
+		time_end = clock();
 		tempm = identity+(*inputmatrix);
+		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (3):
+		time_end = clock();
 		tempm = identity+(*inputmatrix)+(*inputmatrix)*(*inputmatrix);
+		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (4):
+		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		tempm = (identity+(*inputmatrix))*(identity+squared);
+		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (5):
+		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		tempm = identity+(identity+squared)*((*inputmatrix)+squared);
+		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (6):
+		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		cubed = squared*(*inputmatrix);
 		tempm = (identity+(*inputmatrix)+squared)*(identity+cubed);
+		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (7):
+		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		cubed = squared*(*inputmatrix);
 		tempm = identity+((*inputmatrix)+squared+cubed)*(identity+cubed);
+		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (8):
+		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		tempm = (identity+(*inputmatrix))*(identity+squared)*(identity+squared*squared);
+		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (9):
+		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		cubed = squared*(*inputmatrix);
 		tempm = (identity+(*inputmatrix)+squared);
 		squared = cubed*cubed;
 		tempm *= (identity+cubed+squared);
+		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	default:
 		cout << "Error: the size your selected does not match the options" << endl;
@@ -205,10 +234,18 @@ void *neumann(void* data){
 	//Scaling the tempm matrix before updating the outputmatrix
 	tempm = alpha*tempm;
 
+	time_end = clock();
+	time_comp = 1000*(time_end-time_ini)/(double)CLOCKS_PER_SEC;
+
 	//Synchronizing to update the matrix
 	pthread_mutex_lock(&mutex);
 	*outputmatrix += tempm;
 	pthread_mutex_unlock(&mutex);
+
+	time_end = clock();
+	time_total = 1000*(time_end-time_ini)/(double)CLOCKS_PER_SEC;
+	cout << "Times for thread " << N-1 << " are o:" << time_overhead << " c:" << time_comp << " t:" << time_total << " tc:" << time_tcomp << endl;
+
 
 	//The last thing that the thread executes
 	*status = SUCCESS;

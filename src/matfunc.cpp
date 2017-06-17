@@ -117,7 +117,7 @@ int main(int argc, char *argv[])
 void *neumann(void* data){
 	/*
 	 * Input:
-	 * although we represent is as a void pointer, the inpurt argument is a pointer for a struct of type Stt.
+	 * although we represent it as a void pointer, the input argument is a pointer for a struct of type Stt.
 	 * The element N represents the series size and the element alpha represents the constant to be mutiplied by the
 	 * resulting Neumann series.
 	 * Output:

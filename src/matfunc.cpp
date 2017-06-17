@@ -47,13 +47,17 @@ int polynomialNeumann(VectorXd*);
 
 int polynomialHorner(VectorXd*);
 
+timespec diff_time(timespec init, timespec end);
+
+double get_millisecs(timespec time);
+
 int main(int argc, char *argv[])
 {
 	//Calling Eigen to be prepared to multithreading
-	initParallel();
+	//initParallel();
 
 	//Defining variables to keep track of times
-	clock_t time_init, time_end;
+	timespec time_init, time_end;
 	double time_neumann=0.0, time_horner=0.0;
 
 	//Defining the number of threads
@@ -73,10 +77,10 @@ int main(int argc, char *argv[])
 	//Calling the matrix polynomial evaluation function
 	VectorXd coeffs(9);
 	for(unsigned int i = 0; i < 9; i++) coeffs(i) = 2*i+1;
-	time_init = clock();
+	clock_gettime(CLOCK_MONOTONIC, &time_init);
 	int presult = polynomialNeumann(&coeffs);
-	time_end = clock();
-	time_neumann = 1000*(time_end-time_init)/(double)CLOCKS_PER_SEC;
+	clock_gettime(CLOCK_MONOTONIC, &time_end);
+	time_neumann += get_millisecs(diff_time(time_init, time_end));
 	if(presult) {
 		cout << "The function plynomialNeumann return with code " << presult << "." << endl;
 		exit(FAIL);
@@ -87,10 +91,10 @@ int main(int argc, char *argv[])
 	MatrixXd neumannOutput = *outputmatrix;
 
 	//Executing the polynomialHorner(...) function
-	time_init = clock();
+	clock_gettime(CLOCK_MONOTONIC, &time_init);
 	presult = polynomialHorner(&coeffs);
-	time_end = clock();
-	time_horner = 1000*(time_end-time_init)/(double)CLOCKS_PER_SEC;
+	clock_gettime(CLOCK_MONOTONIC, &time_end);
+	time_horner += get_millisecs(diff_time(time_init, time_end));
 	//Saving the polynomialHorner matrix result
 	MatrixXd hornerOutput = *outputmatrix;
 
@@ -124,10 +128,6 @@ void *neumann(void* data){
 	 * up to size 9.
 	 */
 
-	clock_t time_ini, time_end;
-	double time_overhead=0.0, time_comp=0.0, time_total=0.0, time_tcomp=0.0;
-
-	time_ini = clock();
 	//Converting the input structure to NeumannData type
 	Stt* mydata = (Stt*) data;
 	//Passing the series size
@@ -164,66 +164,45 @@ void *neumann(void* data){
 	//Defining the temporary matrix that will be added to the global outputmatrix
 	MatrixXd tempm = MatrixXd(inputmatrix->rows(), inputmatrix->cols());
 
-	time_end = clock();
-	time_overhead = 1000*(time_end-time_ini)/(double)CLOCKS_PER_SEC;
-
 	//Switch case for each differen series size
 	switch(N){
 	case (1):
-		time_end = clock();
 		tempm = identity;
-		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (2):
-		time_end = clock();
 		tempm = identity+(*inputmatrix);
-		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (3):
-		time_end = clock();
 		tempm = identity+(*inputmatrix)+(*inputmatrix)*(*inputmatrix);
-		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (4):
-		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		tempm = (identity+(*inputmatrix))*(identity+squared);
-		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (5):
-		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		tempm = identity+(identity+squared)*((*inputmatrix)+squared);
-		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (6):
-		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		cubed = squared*(*inputmatrix);
 		tempm = (identity+(*inputmatrix)+squared)*(identity+cubed);
-		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (7):
-		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		cubed = squared*(*inputmatrix);
 		tempm = identity+((*inputmatrix)+squared+cubed)*(identity+cubed);
-		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (8):
-		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		tempm = (identity+(*inputmatrix))*(identity+squared)*(identity+squared*squared);
-		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	case (9):
-		time_end = clock();
 		squared = (*inputmatrix)*(*inputmatrix);
 		cubed = squared*(*inputmatrix);
 		tempm = (identity+(*inputmatrix)+squared);
 		squared = cubed*cubed;
 		tempm *= (identity+cubed+squared);
-		time_tcomp = 1000*(clock()-time_end)/(double)CLOCKS_PER_SEC;
 		break;
 	default:
 		cout << "Error: the size your selected does not match the options" << endl;
@@ -234,18 +213,10 @@ void *neumann(void* data){
 	//Scaling the tempm matrix before updating the outputmatrix
 	tempm = alpha*tempm;
 
-	time_end = clock();
-	time_comp = 1000*(time_end-time_ini)/(double)CLOCKS_PER_SEC;
-
 	//Synchronizing to update the matrix
 	pthread_mutex_lock(&mutex);
 	*outputmatrix += tempm;
 	pthread_mutex_unlock(&mutex);
-
-	time_end = clock();
-	time_total = 1000*(time_end-time_ini)/(double)CLOCKS_PER_SEC;
-	cout << "Times for thread " << N-1 << " are o:" << time_overhead << " c:" << time_comp << " t:" << time_total << " tc:" << time_tcomp << endl;
-
 
 	//The last thing that the thread executes
 	*status = SUCCESS;
@@ -394,3 +365,45 @@ int polynomialHorner(VectorXd* coeffs){
 
 	return SUCCESS;
 }
+
+
+timespec diff_time(timespec init, timespec end){
+	/*
+	 * Input:
+	 * init and end are timespec structures that represents the starting and ending time of the measure
+	 * that we are insterested in computing the difference
+	 * Output:
+	 * out_time is a timespec structure representing the time elapsed from the sart to end
+	 * Description:
+	 * this function computes the difference between start and end time, which means the time elapsed between the beginning
+	 * of the measurement and the end
+	 */
+
+	//Output variable
+	timespec out_time;
+
+	if((end.tv_nsec-init.tv_nsec) < 0){
+		out_time.tv_sec = end.tv_sec-init.tv_sec-1;
+		out_time.tv_nsec = 1e9 + end.tv_nsec - init.tv_nsec;
+	} else {
+		out_time.tv_sec = end.tv_sec - init.tv_sec;
+		out_time.tv_nsec = end.tv_nsec - init.tv_nsec;
+	}
+
+	return out_time;
+}
+
+double get_millisecs(timespec time){
+	/*
+	 * Input:
+	 * time is a timespec structure
+	 * Output:
+	 * out_time is a double representins the time in milliseconds
+	 * Description:
+	 * this function converts the time in the timespec structure time to milliseconds measures
+	 */
+
+	double out_time = static_cast<double>(time.tv_sec)*1000+static_cast<double>(time.tv_nsec)/1000000;
+	return out_time;
+}
+
